@@ -41,11 +41,10 @@ async def bsc_json_collect(contract_address, block_from, block_to, key, chunk=30
     logger.info("=====================================================")
     logger.info("Collecting Contract data")
     logger.info("=====================================================")
-
-    url = 'https://api.bscscan.com/api?module=account&action=txlist&address=' + contract_address + '&startblock=0&endblock=99999999' + \
-        '&page=1&offset=1&sort=asc&apikey=' + key 
+    
+    url = 'https://rootstock.blockscout.com/api/v2/addresses/' + contract_address + "/transactions"
     response = requests.get(url)
-
+    logger.info(response.json())
     # Validate API Key
     if (response.json()['message'] == "NOTOK"):
         logger.error("Invalid API Key")
@@ -860,7 +859,7 @@ async def async_fetch_and_store(urls, conn, type, table):
         await Client.close()
 
 
-def bsc_db_collect_async(contract_address, block_from, block_to, key, filedb, chunk=30000):
+def rsk_db_collect_async(contract_address, block_from, block_to, key, filedb, chunk=30000):
     
     try:
         os.remove(filedb)
@@ -896,26 +895,26 @@ def bsc_db_collect_async(contract_address, block_from, block_to, key, filedb, ch
     cursor.execute(sql_create_contract_table)
 
     logger.info("Getting first block")
-    url = 'https://api.bscscan.com/api?module=account&action=txlist&address=' + contract_address + '&startblock=0&endblock=99999999' + \
-        '&page=1&offset=1&sort=asc&apikey=' + key 
-    response = requests.get(url)
+    url = 'https://rootstock.blockscout.com/api/v2/addresses/' + contract_address + "/transactions"
 
+    response = requests.get(url)
+    #logger.info(response.json())
     # Validate API Key
-    if (response.json()['message'] == "NOTOK"):
-        logger.error("Invalid API Key")
-        os.remove(filedb)
-        raise RuntimeError('Invalid API Key')
+    #if (response.json()['message'] == "NOTOK"):
+    #    logger.error("Invalid API Key")
+    #    os.remove(filedb)
+    #    raise RuntimeError('Invalid API Key')
         
-    first_block = response.json()['result'][0]
+    first_block = response.json()['items'][-1]
 
     if (block_from == 0):
-        block_from = int(first_block['blockNumber'])
-    contract_creator = first_block['from']
-
+        block_from = int(first_block['block'])
+    contract_creator = first_block['from']['hash']
+    logger.info("Contract Creator: " + contract_creator)
     logger.info("Storing first block")
     cursor.execute("""INSERT INTO t_contract VALUES (?, ?, ?, ?, ?, ?, ?, ?)""", 
-        (contract_address, 'bsc', block_from, block_to, first_block['blockNumber'], 
-        first_block['hash'], first_block['timeStamp'], first_block['from']))
+        (contract_address, 'rsk', block_from, block_to, first_block['block'], 
+        first_block['hash'], first_block['timestamp'], first_block['from']['hash']))
 
     connection.commit()
     # tag
@@ -943,25 +942,43 @@ def bsc_db_collect_async(contract_address, block_from, block_to, key, filedb, ch
     cursor.execute(sql_create_source_abi_table)
 
     logger.info("Getting source code and ABI")
-    url = 'https://api.bscscan.com/api?module=contract&action=getsourcecode&address=' + contract_address + '&apikey=' + key
+    url = 'https://rootstock.blockscout.com/api/v2/smart-contracts/' + contract_address
     response = requests.get(url)
-    json_obj_source_code = response.json()['result'][0]
+    json_obj_source_code = response.json()
 
     logger.info("Storing source code and ABI")
-    cursor.execute("""INSERT INTO t_source_abi VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", 
-        (json_obj_source_code['SourceCode'],
-         json_obj_source_code['ABI'],
-         json_obj_source_code['ContractName'],
-         json_obj_source_code['CompilerVersion'],
-         json_obj_source_code['OptimizationUsed'],
-         json_obj_source_code['Runs'],
-         json_obj_source_code['ConstructorArguments'],
-         json_obj_source_code['EVMVersion'],
-         json_obj_source_code['Library'],
-         json_obj_source_code['LicenseType'],
-         json_obj_source_code['Proxy'],
-         json_obj_source_code['Implementation'],
-         json_obj_source_code['SwarmSource']))
+    logger.info(json_obj_source_code)
+    cursor.execute("""
+    INSERT INTO t_source_abi (
+        SourceCode,
+        ABI,
+        ContractName,
+        CompilerVersion,
+        OptimizationUsed,
+        Runs,
+        ConstructorArguments,
+        EVMVersion,
+        Library,
+        LicenseType,
+        Proxy,
+        Implementation,
+        SwarmSource
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+        json_obj_source_code.get('source_code'),  # Changed from 'SourceCode'
+        json.dumps(json_obj_source_code.get('abi')),  # Changed from 'ABI'
+        json_obj_source_code.get('name'),  # Changed from 'ContractName'
+        json_obj_source_code.get('compiler_version'),  # Changed from 'CompilerVersion'
+        json_obj_source_code.get('optimization_enabled'),  # Changed from 'OptimizationUsed', needs conversion to match expected format
+        json_obj_source_code.get('optimization_runs'),  # Changed from 'Runs'
+        json.dumps(json_obj_source_code['constructor_args']),  # Convert list/dict to JSON string
+        json_obj_source_code.get('evm_version'),  # Changed from 'EVMVersion'
+        json.dumps(json_obj_source_code['external_libraries']),  # Convert list/dict to JSON string
+        json_obj_source_code.get('license_type'),  # Changed from 'LicenseType'
+        json_obj_source_code.get('has_methods_write_proxy'),  # Changed from 'Proxy', using boolean directly
+        "0x",  # Changed from 'Implementation'
+        ''  # 'SwarmSource' seems not available, using empty string
+    ))
 
     connection.commit()
     # connection.close()
@@ -1254,15 +1271,17 @@ def bsc_db_collect_async(contract_address, block_from, block_to, key, filedb, ch
 
     logger.info("Getting first block of contract creator")
 
-    url = 'https://api.bscscan.com/api?module=account&action=txlist&address=' + contract_creator + '&startblock=0&endblock=99999999' + \
-        '&page=1&offset=1&sort=asc&apikey=' + key 
+
+    url = 'https://rootstock.blockscout.com/api/v2/addresses/' + contract_creator + "/transactions"
+
     response = requests.get(url)
 
-    first_block_creator = response.json()['result'][0]
+    first_block_creator = response.json()['items'][-1]
     # first_block_number = int(first_block_creator['blockNumber'])
 
     # first_time = datetime.datetime.timestamp(first_block_creator['timeStamp'])
-    first_time = datetime.datetime.fromtimestamp(int(first_block_creator['timeStamp']))
+    logger.info(first_block_creator)
+    first_time = datetime.datetime.fromisoformat(first_block_creator['timestamp'].replace('Z', '+00:00'))
 
     # print(f"Block number (first): {first_block_creator['blockNumber']}")
     # print(f"Hash (first) : {first_block_creator['hash']}")
@@ -1274,9 +1293,10 @@ def bsc_db_collect_async(contract_address, block_from, block_to, key, filedb, ch
     # print ("============================================================")
     # TODO: Do we need internals and BEP20?
 
-    url_home = "https://bscscan.com/address/" + contract_creator 
-    url_tokens = "https://bscscan.com/address-tokenpage?m=normal&a=" + contract_creator
+    url_home = "https://rootstock.blockscout.com/address/" + contract_creator + "?tab=token_transfers" 
+    url_tokens = "https://rootstock.blockscout.com/token/" + contract_creator
 
+    logger.info(url_home)
     # Home
     scraper = cloudscraper.create_scraper()
     r_home = scraper.get(url_home)
@@ -1731,7 +1751,7 @@ def bsc_db_collect_async(contract_address, block_from, block_to, key, filedb, ch
     return 0
 
 
-def bsc_db_process(filename):
+def rsk_db_process(filename):
     # Validate file
     if (not os.path.exists(filename)):
         raise FileNotFoundError("SQLite db file not found")

@@ -74,7 +74,7 @@ def r_contract():
 
     # Fix JSON
     # sc = ast.literal_eval(source_code)[0]
-    sc = ast.literal_eval(source_code)
+    sc = json.loads(source_code)
     abi = sc['ABI']
     abi = abi.replace("\\", "")
     abi = abi.replace('\"', '"')
@@ -82,7 +82,7 @@ def r_contract():
     abi = abi.replace(':true', ':"true"')
     abi = abi.replace('""', '"null"')
 
-    abi = ast.literal_eval(abi)
+    abi = json.loads(abi)
 
     abi_org = []
     const = []
@@ -124,11 +124,13 @@ def r_contract():
         if (i['type'] == 'function'):
             funct.append({"name": i['name'], "cssClass": "ngx-org-funct", "image": "", "title": "Name", "childs": children_io})
 
-    abi_org.append(const[0])
-    if (event != []):
+    if const:
+        abi_org.append(const[0])
+    if event:
         abi_org.append({"name": "EVENTS", "cssClass": "ngx-org-event-node", "image": "", "title": "", "childs": event})
-    if (funct != []):
+    if funct:
         abi_org.append({"name": "FUNCTIONS", "cssClass": "ngx-org-funct-node", "image": "", "title": "", "childs": funct})
+
 
     contract = ast.literal_eval(contract_info)
 

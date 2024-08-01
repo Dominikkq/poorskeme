@@ -16,7 +16,7 @@ import coloredlogs, logging
 from api_poorSKeme import create_application
 from core import bsc
 from core import eth
-
+from core import rsk
 
 # create a logger object.
 logger = logging.getLogger(__name__)
@@ -47,7 +47,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 def httpServer():
     PORT = 4200
     logger.info("HTTPD serving... Data Visualization Web on http://127.0.0.1:4200")
+    print("HTTPD serving... Data Visualization Web on http://127.0.0.1:4200")
     with socketserver.TCPServer(("", PORT), Handler) as httpd_server:
+        print("serving at port", PORT)
         httpd_server.serve_forever()
 
 
@@ -89,15 +91,15 @@ $$ |      \$$$$$$  |\$$$$$$  |$$ |            \$$$$$$  |$$ | \$$\\\$$$$$$$\ $$ |
     group2 = parser.add_argument_group("Process data from JSON file")
     group3 = parser.add_argument_group("Start WebServer visualization data")
 
-    group1.add_argument('-bc', '--blockchain', choices=["bsc", "eth"], 
-                        default="eth", help="Select Blockchain (bsc, eth)")
+    group1.add_argument('-bc', '--blockchain', choices=["bsc", "eth", "rsk"], 
+                        default="rsk", help="Select Blockchain (bsc, eth, rsk)")
     group1.add_argument('-ct', '--contract',
                         help="address of contract")
     group1.add_argument('-bf', '--block-from', default=0, type=int,
                         help="Block start")
     group1.add_argument('-bt', '--block-to', default=99999999, type=int,
                         help="Block end")
-    group1.add_argument('-c', '--chunk', type=int, default=10000,
+    group1.add_argument('-c', '--chunk', type=int, default=9000000,
                         help='Chunks of blocks')
 
     group2.add_argument('-f', '--file', type=str,
@@ -107,6 +109,9 @@ $$ |      \$$$$$$  |\$$$$$$  |$$ |            \$$$$$$  |$$ | \$$\\\$$$$$$$\ $$ |
                         help="WEB for data visaulization")
 
     args = parser.parse_args()
+
+
+    print("1 DOMYZ")
 
     # Read config and keys
     with open(r'./API.yaml') as file:
@@ -122,57 +127,43 @@ $$ |      \$$$$$$  |\$$$$$$  |$$ |            \$$$$$$  |$$ | \$$\\\$$$$$$$\ $$ |
     # Validations
     if (args.contract):
         filedb = "contract-" + args.blockchain + "-" + args.contract + ".db"
-
         if (args.file):
             logger.warning("Parameter file are discarded because contract is provided")
-
         if (args.blockchain == "bsc"):
-            # WARNING: Remove
-            # asyncio.run(bsc.bsc_json_collect(args.contract, args.block_from, args.block_to, key['bscscan'], chunk=args.chunk))
             bsc.bsc_db_collect_async(args.contract, args.block_from, args.block_to, key['bscscan'], filedb, chunk=args.chunk)
-
         if (args.blockchain == "eth"):
-            # WARNING: Remove
-            # asyncio.run(eth.eth_json_collect(args.contract, args.block_from, args.block_to, key['ethscan'], chunk=args.chunk))
             eth.eth_db_collect_async(args.contract, args.block_from, args.block_to, key['ethscan'], filedb, chunk=args.chunk)
-
+        if (args.blockchain == "rsk"):
+            rsk.rsk_db_collect_async(args.contract, args.block_from, args.block_to, key['rskscan'], filedb, chunk=args.chunk)
     elif (args.file):
-        if (args.blockchain == "bsc"):
-            rc = bsc.bsc_db_process(args.file)
-        if (args.blockchain == "eth"):
-            rc = eth.eth_db_process(args.file)
-
-    # WARNING: Death code soon
-    # elif (args.file[-4:] == 'json'):
-    #     if (args.blockchain == "bsc"):
-    #         rc = bsc.bsc_json_process(args.file)
-    #     if (args.blockchain == "eth"):
-    #         rc = eth.eth_json_process(args.file)
-
+        rc = rsk.rsk_db_process(args.file)
     else:
         if (args.block_from or args.block_to or args.chunck):
             logger.error("The CONTRACT ADDRESS is not specified")
             raise RuntimeError("The CONTRACT ADDRESS is not specified")
-
+    print("2")
+    print(args)
     if (args.web):
+        print("3")
         sys.stdout.flush()
         # File to process
         if (args.file):
             filename = args.file
         else:
             filename = filedb
-        
+        print("4")
         kwargs_flask = {"ip": "127.0.0.1", "port": 5000, "file": filename}
         flask_proc = multiprocessing.Process(name='flask',
                                                 target=flaskServer,
                                                 kwargs=kwargs_flask)
+        print("5")
         flask_proc.daemon = True
-
+        print("6")
         sys.stdout.flush()
         httpd_proc = multiprocessing.Process(name='httpd',
                                                 target=httpServer)
         httpd_proc.daemon = True
-
+        print("7")
         flask_proc.start()
         httpd_proc.start()
         flask_proc.join()
